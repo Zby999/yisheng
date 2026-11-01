@@ -60,7 +60,7 @@ def render_bi_link_search_box(input_label, input_key, help_text=""):
     return query_text
 
 # ==========================================
-# 🧭 侧边栏：核心导航菜单与模型设置
+# 🔌 侧边栏：核心导航菜单与模型设置
 # ==========================================
 st.sidebar.title("🧭 导航菜单")
 
@@ -73,18 +73,37 @@ nav_module = st.sidebar.radio(
         "🔍 知识图谱与双链搜索",
         "⚖️ 大模型推演生成"
     ],
-    disabled=st.session_state.is_generating  # 生成时锁定侧边栏，防止切走
+    disabled=st.session_state.is_generating
 )
 
 st.sidebar.divider()
 st.sidebar.header("🔌 模型接入设置")
-api_choice = st.sidebar.radio("选择大模型后端：", ["本地 Ollama (完全离线)", "云端 DeepSeek API"], disabled=st.session_state.is_generating)
 
-if api_choice == "云端 DeepSeek API":
+# 设定三种模式的选择
+api_choice = st.sidebar.radio(
+    "选择大模型运行模式：", 
+    [
+        "☁️ 云端 API (DeepSeek)", 
+        "🦙 Ollama 本地托管服务", 
+        "📁 本地绝对地址直接加载 (GGUF)"
+    ],
+    disabled=st.session_state.is_generating
+)
+
+# 根据不同模式显示不同的配置输入框
+if api_choice == "☁️ 云端 API (DeepSeek)":
     api_key = st.sidebar.text_input("🔑 请输入 API Key:", type="password", disabled=st.session_state.is_generating)
-else:
+elif api_choice == "🦙 Ollama 本地托管服务":
     ollama_model = st.sidebar.text_input("🦙 本地模型名称:", value="deepseek-r1:14b", disabled=st.session_state.is_generating)
-    st.sidebar.caption("请确保 Ollama 软件正在电脑后台运行")
+    st.sidebar.caption("请确保本机后台正在运行 Ollama 服务 (localhost:11434)")
+else:
+    gguf_path = st.sidebar.text_input(
+        "📂 模型绝对路径 (.gguf):", 
+        value=r"D:\Models\deepseek-r1-14b.gguf", 
+        placeholder="例如: C:\models\model.gguf",
+        disabled=st.session_state.is_generating
+    )
+    st.sidebar.caption("需本地安装 llama-cpp-python 库以支持绝对路径直连")
 
 
 # ==========================================
@@ -273,11 +292,13 @@ elif nav_module == "⚖️ 大模型推演生成":
             st.code(final_prompt, language="markdown")
 
             if send_api:
-                # 开启生成状态锁，锁定所有输入，保护流式传输不被切断
                 st.session_state.is_generating = True
                 st.subheader("🎬 大模型推演结果：")
                 
-                if api_choice == "本地 Ollama (完全离线)":
+                # -----------------------------------------
+                # 模式 1：Ollama 本地托管服务
+                # -----------------------------------------
+                if api_choice == "🦙 Ollama 本地托管服务":
                     with st.spinner("Ollama 正在本地显卡上疯狂运算中..."):
                         try:
                             response = requests.post(
@@ -285,7 +306,7 @@ elif nav_module == "⚖️ 大模型推演生成":
                                 json={
                                     "model": ollama_model, 
                                     "prompt": final_prompt, 
-                                    "stream": True,  # 开启流式
+                                    "stream": True,
                                     "options": {
                                         "num_predict": 2048,
                                         "temperature": 0.7
@@ -319,11 +340,60 @@ elif nav_module == "⚖️ 大模型推演生成":
                         except Exception as e:
                             st.error(f"连接 Ollama 失败，请确认后台运行。详情: {e}")
                         finally:
-                            # 无论成功失败，流式传输结束后立刻解除锁定并刷新页面恢复交互
                             st.session_state.is_generating = False
                             st.rerun()
 
-                elif api_choice == "云端 DeepSeek API":
+                # -----------------------------------------
+                # 模式 2：本地绝对地址直接加载 (GGUF)
+                # -----------------------------------------
+                elif api_choice == "📁 本地绝对地址直接加载 (GGUF)":
+                    with st.spinner("正在通过绝对路径加载本地模型权重并推理..."):
+                        try:
+                            # 尝试导入 llama_cpp 库
+                            from llama_cpp import Llama
+                            
+                            # 初始化本地模型（建议加缓存避免每次重复加载权重）
+                            @st.cache_resource
+                            def load_local_model(path):
+                                return Llama(model_path=path, n_ctx=2048, verbose=False)
+                            
+                            llm = load_local_model(gguf_path)
+                            
+                            # 调用本地模型生成
+                            output = llm(
+                                final_prompt, 
+                                max_tokens=2048, 
+                                temperature=0.7, 
+                                stream=True
+                            )
+                            
+                            full_response = ""
+                            output_placeholder = st.empty()
+                            
+                            for chunk in output:
+                                delta = chunk["choices"][0]["text"]
+                                full_response += delta
+                                output_placeholder.markdown(full_response + "▌")
+                                
+                            output_placeholder.markdown(full_response)
+                            st.session_state.history_outputs.append({
+                                "input": user_input,
+                                "output": full_response
+                            })
+                            st.success("🎉 本地绝对路径模型推演完成！")
+                            
+                        except ImportError:
+                            st.error("❌ 未检测到 `llama_cpp` 库！请在本地终端运行 `pip install llama-cpp-python` 后重试。")
+                        except Exception as e:
+                            st.error(f"加载或运行本地模型文件出错: {e}")
+                        finally:
+                            st.session_state.is_generating = False
+                            st.rerun()
+
+                # -----------------------------------------
+                # 模式 3：云端 API (DeepSeek)
+                # -----------------------------------------
+                elif api_choice == "☁️ 云端 API (DeepSeek)":
                     api_key = st.secrets.get("DEEPSEEK_API_KEY", "")
                     if not api_key:
                         st.error("❌ 未检测到本地安全配置（secrets.toml 中的 DEEPSEEK_API_KEY）！")
