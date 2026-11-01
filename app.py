@@ -394,9 +394,9 @@ elif nav_module == "⚖️ 大模型推演生成":
                 # 模式 3：云端 API (DeepSeek)
                 # -----------------------------------------
                 elif api_choice == "☁️ 云端 API (DeepSeek)":
-                    api_key = st.secrets.get("DEEPSEEK_API_KEY", "")
+                    # 直接使用侧边栏输入的 api_key 变量
                     if not api_key:
-                        st.error("❌ 未检测到本地安全配置（secrets.toml 中的 DEEPSEEK_API_KEY）！")
+                        st.error("❌ 请先在左侧边栏输入你的 DeepSeek API Key！")
                         st.session_state.is_generating = False
                     else:
                         with st.spinner("正在呼叫云端 DeepSeek 服务器..."):
